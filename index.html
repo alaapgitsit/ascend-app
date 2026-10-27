@@ -331,6 +331,7 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:18px 0}
 .cal-side b{font-family:var(--font-display);font-size:19px}
 .macros{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
 .mc{font-size:11px;font-weight:800;padding:3px 8px;border-radius:7px}
+.mc.over{color:#fff!important;background:var(--danger)!important;font-weight:900}
 .mc.c{color:#628078;background:rgba(98,128,120,.15)}
 .mc.p{color:#ff3a22;background:rgba(255,58,34,.15)}
 .mc.f{color:#a4893d;background:rgba(164,137,61,.18)}
@@ -809,7 +810,7 @@ function totalVolumeKg(){return state.workouts.reduce((a,w)=>a+workoutVolumeKg(w
 /* ---------- Streaks & badges (three independent streaks) ---------- */
 const STEP_GOAL=6500, WATER_REMINDER=4000;
 function mealsLoggedOn(date){const fd=foodDay(date);if(!fd)return 0;let n=0;MEALS.forEach(m=>{if(fd[m]&&fd[m].length)n++;});return n;}
-function dayComplete(date){return mealsLoggedOn(date)>=3;}            // ≥3 of 4 meals
+function dayComplete(date){if(mealsLoggedOn(date)>=3)return true;const h=histFor(date);return !!(h&&h.kcal);} // ≥3 meals, or an imported day you tracked
 function stepsOk(date){const s=bodyVal(date,'steps');return s!=null&&+s>=STEP_GOAL;}
 function workoutsInWeek(monday){return state.workouts.filter(w=>mondayOf(w.date).getTime()===monday).length;}
 // Generic consecutive-DAY streak for a predicate, with one forgiven gap (streak freeze).
@@ -1641,7 +1642,7 @@ function foodTotals(date){
 }
 function macroGoals(){return state.settings.macros||null;}
 function macroChips(ft){const g=macroGoals();
-  const cell=(lbl,val,tgt,cls)=>`<span class="mc ${cls}">${lbl} ${val}${tgt?('/'+tgt):''}g</span>`;
+  const cell=(lbl,val,tgt,cls)=>{const over=tgt&&val>tgt;return `<span class="mc ${cls}${over?' over':''}">${lbl} ${val}${tgt?('/'+tgt):''}g${over?' ⚠':''}</span>`;};
   return `<div class="macros">${cell('C',ft.c,g&&g.c,'c')}${cell('P',ft.p,g&&g.p,'p')}${cell('F',ft.f,g&&g.f,'f')}</div>`;
 }
 function bodyVal(date,field){const k=dkey(date);
@@ -1792,6 +1793,7 @@ function renderFood(){
     if(item)toastUndo("Removed "+(item.n||'item'),()=>{insertFood(d,m,idx,item);renderFood();});}));
   $$('[data-move-food]',el).forEach(b=>b.addEventListener('click',()=>{const parts=b.dataset.moveFood.split("::");openFoodActions(parts[0],+parts[1]);}));
   const be=$("#budEdit",el);if(be)be.addEventListener('click',openBudget);
+  if(sameDay(viewDate,Date.now())){pushTodaySummary();maybeCelebrate(mealStreak(),stepStreak(),workoutStreak());}
 }
 // Foods the user has actually logged (newest first, deduped by name) — so search
 // finds everything they've added, not only the baked catalogue.
@@ -2056,9 +2058,12 @@ function offLookup(code){
 }
 // Open Food Facts TEXT search — find foods not in the catalogue.
 function offSearch(query){
+  // No sort_by — the popularity sort makes Open Food Facts' search time out.
   const url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+encodeURIComponent(query)+
-    "&search_simple=1&action=process&json=1&page_size=40&sort_by=unique_scans_n&fields=product_name,brands,nutriments,serving_size";
-  return fetch(url,{headers:{'Accept':'application/json'}}).then(r=>r.json()).then(j=>{
+    "&search_simple=1&action=process&json=1&page_size=25&fields=product_name,brands,nutriments";
+  const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),13000);
+  return fetch(url,{signal:ctrl.signal}).then(r=>r.json()).then(j=>{
+    clearTimeout(to);
     const prods=(j&&j.products)||[];const out=[];
     prods.forEach(p=>{
       const nu=p.nutriments||{};const k=+nu['energy-kcal_100g'];

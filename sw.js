@@ -1,10 +1,12 @@
-const C='ascend-v3';
+const C='ascend-v4';
 const CORE=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(CORE)).catch(()=>{}));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{
   if(e.request.method!=='GET')return;
   const url=new URL(e.request.url);
+  // Never touch cross-origin requests (e.g. Open Food Facts search) — let them hit the network directly.
+  if(url.origin!==self.location.origin)return;
   const isDoc=e.request.mode==='navigate'||url.pathname.endsWith('/')||url.pathname.endsWith('index.html');
   if(isDoc){
     // Network-first for the page: new deploys show up immediately; fall back to cache offline.
