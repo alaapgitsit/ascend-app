@@ -359,6 +359,12 @@ hr.soft{border:0;border-top:1px solid var(--line);margin:18px 0}
 .snap .v.sleepv{font-size:20px}
 .snap .v small{font-size:13px;color:var(--muted);font-family:var(--font-ui);font-weight:700;margin-left:3px}
 .mini-row{display:flex;align-items:center;gap:12px;padding:5px 0}
+.mini-row.tappable{cursor:pointer;margin:0 -6px;padding:6px;border-radius:10px}
+.mini-row.tappable:active{background:var(--surface-2)}
+.mini-chev{margin-left:auto;color:var(--faint);font-size:20px;font-weight:700;flex:0 0 auto}
+.sess-opt span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sess-opt b{font-weight:800;font-size:14px}
+.sess-opt small{color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mini-ic{width:40px;height:40px;flex:0 0 auto;border-radius:11px;display:grid;place-items:center;background:var(--surface-2)}
 .mini-ic.grad{background:var(--grad)}
 .mini-main{display:flex;flex-direction:column;min-width:0}
@@ -962,7 +968,8 @@ function renderHome(){
       if(t.kind==="ascend"){const base=`${t.ex} exercises · ${t.volume.toLocaleString()} ${unitLbl()}`;metr.unshift(base);}
       const ic=t.kind==="garmin"?gTypeIcon(t.gtype):gTypeIcon('strength');
       const tag=t.kind==="ascend"?(t.fused?`<span class="src-tag">＋ Garmin</span>`:``):`<span class="src-tag g">Garmin</span>`;
-      return `<div class="mini-row"><div class="mini-ic grad">${ic}</div><div class="mini-main"><b>${esc(t.name)} ${tag}</b><span>${metr.join(' · ')}</span></div></div>`;
+      const tap=t.kind==="ascend"&&t.id?` data-open-w="${t.id}"`:'';
+      return `<div class="mini-row${tap?' tappable':''}"${tap}><div class="mini-ic grad">${ic}</div><div class="mini-main"><b>${esc(t.name)} ${tag}</b><span>${metr.join(' · ')}</span></div>${tap?'<span class="mini-chev">›</span>':''}</div>`;
     }).join("");
   }else{
     wBlock=`<div class="mini-empty">No workout${isToday?' yet':''}. <a data-goto="log">Log one →</a> · runs &amp; rides appear here from Garmin.</div>`;
@@ -1017,6 +1024,7 @@ function renderHome(){
   $$('[data-fe]',el).forEach(b=>b.addEventListener('click',()=>openFastEdit(b.dataset.fe)));
   $$('[data-fe-ts]',el).forEach(b=>b.addEventListener('click',()=>openFastEdit('edit',+b.dataset.feTs)));
   $$('[data-goto]',el).forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.goto)));
+  $$('[data-open-w]',el).forEach(b=>b.addEventListener('click',()=>editWorkout(b.dataset.openW)));
   $$('[data-sync]',el).forEach(b=>b.addEventListener('click',syncHealth));
   $$('[data-wadd]',el).forEach(b=>b.addEventListener('click',()=>{addWater(viewDate,+b.dataset.wadd);renderHome();}));
   const wc=$("#wtrCustom",el);if(wc)wc.addEventListener('click',openWaterCustom);
@@ -1053,6 +1061,24 @@ function openWaterGoal(){
 function tplDisplayName(id){return (state.tplNames[id]) || (TEMPLATES[id]?TEMPLATES[id].name:id);}
 
 /* ---------- LOG ---------- */
+// Load a saved workout back into the editor so it can be viewed and changed.
+function editWorkout(id){
+  const w=state.workouts.find(x=>x.id===id);if(!w)return;
+  const exercises=(w.exercises||[]).map(ex=>{
+    if((ex.type||"strength")==="cardio"){const c=ex.cardio||{};
+      return {name:ex.name||"",label:"",open:true,type:"cardio",
+        cardio:{distance:c.distanceKm!=null?String(c.distanceKm):"",duration:c.durationMin!=null?String(c.durationMin):"",speed:c.speedKmh!=null?String(c.speedKmh):""},
+        sets:Array.from({length:SETS_PER_EX},()=>({reps:DEFAULT_REPS,weight:""}))};}
+    const sets=(ex.sets||[]).map(s=>({reps:s.reps!=null?String(s.reps):"",weight:s.weightKg!=null?String(round1(fromKg(s.weightKg))):""}));
+    while(sets.length<SETS_PER_EX)sets.push({reps:DEFAULT_REPS,weight:""});
+    return {name:ex.name||"",label:"",open:!ex.name,type:"strength",cardio:{distance:"",duration:"",speed:""},sets};
+  });
+  session={templateId:w.templateId||Object.keys(TEMPLATES)[0], startedAt:Date.now(),
+    when:localDatetimeValue(new Date(w.date)), timer:{running:false,elapsedBefore:0,startedAt:null},
+    exercises, note:w.note||"", editingId:id};
+  saveDraft();startAutoSave();setTab("log");
+  toast("Editing session — Finish to save changes");
+}
 function newSession(tplId){
   const t=TEMPLATES[tplId];
   const exercises=t.exercises.map(e=>{
@@ -1068,6 +1094,19 @@ function newSession(tplId){
     timer:{running:false, elapsedBefore:0, startedAt:null}, exercises, note:""};
 }
 
+function pastSessionsSection(){
+  const ws=[...state.workouts].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,40);
+  if(!ws.length)return '';
+  const rows=ws.map(w=>{
+    const exs=(w.exercises||[]);
+    const names=exs.map(e=>e.name).filter(Boolean).slice(0,3).join(', ')||'Workout';
+    const vol=Math.round(fromKg(workoutVolumeKg(w)));
+    const pr=(w.prs&&w.prs.length)?' ★':'';
+    const meta=`${exs.length} ex`+(vol?` · ${vol.toLocaleString()} ${unitLbl()}`:'');
+    return `<button class="day-opt sess-opt" data-edit-w="${w.id}"><span><b>${fmtDDMMYYYY(w.date)}${pr}</b><small>${esc(names)}</small></span><small>${meta} ›</small></button>`;
+  }).join("");
+  return `<div class="section-title" style="margin-top:4px">Past sessions</div><div class="day-list" style="margin-bottom:12px">${rows}</div>`;
+}
 function renderLog(){
   const el=$("#tab-log");
   const main=$("#main");const prevScroll=main?main.scrollTop:0;
@@ -1078,7 +1117,7 @@ function renderLog(){
 
   let body="";
   if(!session){
-    body=`<div class="empty" style="padding-top:28px">
+    body=pastSessionsSection()+`<div class="empty" style="padding-top:28px">
       <div class="big" style="font-size:40px">PICK A<br>TEMPLATE</div>
       <p>Choose a template above — your exercises, 4 sets each with reps &amp; weight, appear instantly. Fill what you did, then finish.</p></div>`;
   }else{
@@ -1089,9 +1128,10 @@ function renderLog(){
         <textarea id="sessNotes" class="sess-notes" placeholder="Anything worth remembering — how it felt, pain, substitutions, PRs…">${esc(session.note||'')}</textarea>
       </div>
       <div class="save-row">
-        <button class="btn btn-primary btn-block" id="finishBtn">Finish &amp; save</button>
-        <button class="btn btn-ghost btn-block" id="discardBtn" style="color:var(--faint)">Discard</button>
-        <div class="export-note">Saved to Ascend instantly.</div>
+        <button class="btn btn-primary btn-block" id="finishBtn">${session.editingId?'Save changes':'Finish &amp; save'}</button>
+        ${session.editingId?`<button class="btn btn-block" id="deleteWBtn" style="background:var(--surface-2);border:1px solid var(--line);color:var(--danger)">Delete this session</button>`:''}
+        <button class="btn btn-ghost btn-block" id="discardBtn" style="color:var(--faint)">${session.editingId?'Cancel edit':'Discard'}</button>
+        <div class="export-note">${session.editingId?'Editing a saved session.':'Saved to Ascend instantly.'}</div>
       </div>`;
   }
 
@@ -1133,12 +1173,17 @@ function renderLog(){
       saveDraft();renderLog();
     });
     $("#finishBtn",el).addEventListener("click",()=>finishWorkout(false));
-    $("#discardBtn",el).addEventListener("click",()=>{session=null;stopSessTimer();stopAutoSave();clearDraft();renderLog();toast("Session discarded");});
+    $("#discardBtn",el).addEventListener("click",()=>{const wasEdit=session.editingId;session=null;stopSessTimer();stopAutoSave();clearDraft();if(wasEdit)setTab("home");else renderLog();toast(wasEdit?"Edit cancelled":"Session discarded");});
+    const dw=$("#deleteWBtn",el);if(dw)dw.addEventListener("click",()=>{
+      const idx=state.workouts.findIndex(w=>w.id===session.editingId);
+      if(idx>=0)state.workouts.splice(idx,1);save();
+      session=null;stopSessTimer();stopAutoSave();clearDraft();setTab("home");toast("Session deleted");renderGraphs();});
     $("#restBtn",el).addEventListener("click",toggleRest);
     const sb=$("#startTimerBtn",el);if(sb)sb.addEventListener("click",toggleTimer);
     const nt=$("#sessNotes",el);if(nt)nt.addEventListener("input",()=>{session.note=nt.value;saveDraft();});
     startSessTimer();updateTimerBtn();startAutoSave();
   }
+  $$('[data-edit-w]',el).forEach(b=>b.addEventListener("click",()=>editWorkout(b.dataset.editW)));
   // Keep the view where it was (e.g. on the exercise you're filling) instead of
   // jumping to the top when a set/exercise is added or a toggle re-renders.
   if(main)main.scrollTop=prevScroll;
@@ -1342,15 +1387,20 @@ function finishWorkout(sendGarmin){
   if(isNaN(when.getTime()))when=new Date();
   const liveSec=timerElapsed();
   const isPast=Math.abs(Date.now()-when.getTime())>36e5; // >1h from now = a past log
-  const durationSec=isPast?0:liveSec;
+  const origW=session.editingId?state.workouts.find(w=>w.id===session.editingId):null;
+  // Editing a saved session shouldn't zero its duration just because the timer didn't run.
+  const durationSec=(origW&&liveSec<2)?(origW.durationSec||0):(isPast?0:liveSec);
   // PR detection against existing history
   const prs=[];
   exercises.forEach(ex=>{const prev=bestKg(ex.name);const now=trackedKg(ex);
     if(now!=null && (prev==null||now>prev)) prs.push({name:ex.name, kg:now});});
-  const workout={id:"w"+Date.now()+Math.random().toString(36).slice(2,6),
+  const workout={id:session.editingId||("w"+Date.now()+Math.random().toString(36).slice(2,6)),
     date:when.toISOString(), templateId:session.templateId, durationSec, note:session.note||"",
     exercises, prs:prs.map(p=>p.name)};
-  state.workouts.push(workout);save();
+  if(session.editingId){const idx=state.workouts.findIndex(w=>w.id===session.editingId);
+    if(idx>=0)state.workouts[idx]=workout; else state.workouts.push(workout);}
+  else state.workouts.push(workout);
+  save();
 
   const hadPR=prs.length>0;
   session=null;stopSessTimer();stopAutoSave();clearDraft();
@@ -1809,7 +1859,7 @@ function trainingItems(date){
     gw.forEach((g,gi)=>{if(used.has(gi))return;if(g.type!=="strength"&&g.type!=="hiit")return;
       if(gwOverlapsAscend(g,w)){const gap=Math.abs(g.start-new Date(w.date).getTime());if(gap<bestGap){bestGap=gap;best=gi;}}});
     const g=best>=0?gw[best]:null;if(g)used.add(best);
-    out.push({kind:"ascend",name:tplDisplayName(w.templateId),ex:w.exercises.length,
+    out.push({kind:"ascend",id:w.id,name:tplDisplayName(w.templateId),ex:w.exercises.length,
       volume:Math.round(fromKg(workoutVolumeKg(w))),when:new Date(w.date).getTime(),
       kcal:g?g.kcal:null,avgHr:g?g.avgHr:null,maxHr:g?g.maxHr:null,fused:!!g});
   });
