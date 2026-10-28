@@ -203,6 +203,10 @@ main{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:
   font-weight:700;color:var(--fg);color-scheme:light;width:100%}
 .when-row input:focus{outline:0;border-color:var(--primary)}
 .when-row .lbl{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint);font-weight:800}
+.notes-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:12px 0 2px;display:flex;flex-direction:column;gap:7px}
+.notes-card .lbl{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint);font-weight:800}
+.sess-notes{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:15px;color:var(--fg);width:100%;min-height:72px;resize:vertical;font-family:inherit;line-height:1.45}
+.sess-notes:focus{outline:0;border-color:var(--primary)}
 .savedline{font-size:10.5px;color:var(--faint);font-weight:700;text-align:right;margin:4px 4px 0;letter-spacing:.3px}
 
 .ex-block{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
@@ -1060,6 +1064,7 @@ function newSession(tplId){
 
 function renderLog(){
   const el=$("#tab-log");
+  const main=$("#main");const prevScroll=main?main.scrollTop:0;
   const opts=Object.keys(TEMPLATES).map(id=>{
     const sel=session&&session.templateId===id?"selected":"";
     return `<option value="${id}" ${sel}>${esc(tplDisplayName(id))} · ${esc(TEMPLATES[id].tag)}</option>`;
@@ -1073,6 +1078,10 @@ function renderLog(){
   }else{
     session.exercises.forEach((ex,i)=>{ body+=renderExBlock(ex,i); });
     body+=`<button class="add-ex" id="addEx">＋ Add exercise</button>
+      <div class="notes-card">
+        <div class="lbl">Notes</div>
+        <textarea id="sessNotes" class="sess-notes" placeholder="Anything worth remembering — how it felt, pain, substitutions, PRs…">${esc(session.note||'')}</textarea>
+      </div>
       <div class="save-row">
         <button class="btn btn-primary btn-block" id="finishBtn">Finish &amp; save</button>
         <button class="btn btn-ghost btn-block" id="discardBtn" style="color:var(--faint)">Discard</button>
@@ -1121,8 +1130,12 @@ function renderLog(){
     $("#discardBtn",el).addEventListener("click",()=>{session=null;stopSessTimer();stopAutoSave();clearDraft();renderLog();toast("Session discarded");});
     $("#restBtn",el).addEventListener("click",toggleRest);
     const sb=$("#startTimerBtn",el);if(sb)sb.addEventListener("click",toggleTimer);
+    const nt=$("#sessNotes",el);if(nt)nt.addEventListener("input",()=>{session.note=nt.value;saveDraft();});
     startSessTimer();updateTimerBtn();startAutoSave();
   }
+  // Keep the view where it was (e.g. on the exercise you're filling) instead of
+  // jumping to the top when a set/exercise is added or a toggle re-renders.
+  if(main)main.scrollTop=prevScroll;
 }
 function paceStr(c){
   const d=parseFloat(c&&c.distance), t=parseFloat(c&&c.duration);
