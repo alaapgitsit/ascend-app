@@ -243,11 +243,17 @@ main{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:
   border-radius:10px;padding:8px;font-weight:800;font-size:12.5px}
 .type-toggle button.on{background:var(--surface-3);color:var(--fg);border-color:var(--primary)}
 .type-toggle button:active{transform:scale(.97)}
-.cardio-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.cfield{display:flex;flex-direction:column;gap:5px}
-.cfield span{font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--faint);font-weight:800}
-.cfield input{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px;
+.cardio-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cardio-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.cfield{display:flex;flex-direction:column;gap:5px;min-width:0}
+.cfield span{font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cfield input{width:100%;min-width:0;box-sizing:border-box;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 8px;
   font-weight:700;font-size:16px;text-align:center;-moz-appearance:textfield}
+.cardio-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.cardio-chip{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:7px 13px;color:var(--muted);font-weight:700;font-size:13px;cursor:pointer}
+.cardio-chip.on{background:var(--grad-cyan);border:0;color:#04121a}
+.cardio-chip:active{transform:scale(.96)}
+.cfield input.derived{border-color:var(--cyan);border-style:dashed;color:var(--cyan)}
 .cfield input::-webkit-outer-spin-button,.cfield input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .cfield input:focus{outline:0;border-color:var(--cyan)}
 .pace{margin-top:9px;text-align:center;font-size:12px;font-weight:800;color:var(--cyan);min-height:14px}
@@ -1137,11 +1143,33 @@ function renderLog(){
   // jumping to the top when a set/exercise is added or a toggle re-renders.
   if(main)main.scrollTop=prevScroll;
 }
-function paceStr(c){
-  const d=parseFloat(c&&c.distance), t=parseFloat(c&&c.duration);
-  if(isFinite(d)&&d>0&&isFinite(t)&&t>0){const p=t/d;const m=Math.floor(p);const s=Math.round((p-m)*60);
-    return `Pace ${m}:${String(s).padStart(2,"0")} /km`;}
-  return "";
+const CARDIO_MACHINES=['SkiErg','Row','Treadmill','Stepper'];
+function cardioSummary(c){
+  const d=parseFloat(c&&c.distance), t=parseFloat(c&&c.duration), s=parseFloat(c&&c.speed);
+  const parts=[];
+  if(isFinite(s)&&s>0)parts.push(`${round1(s)} km/h`);
+  if(isFinite(d)&&d>0&&isFinite(t)&&t>0){const p=t/d;const m=Math.floor(p);const ss=Math.round((p-m)*60);
+    parts.push(`${m}:${String(ss).padStart(2,"0")} /km`);}
+  return parts.join('  ·  ');
+}
+function paceStr(c){return cardioSummary(c);}
+// Distance (km), Time (min), Speed (km/h) are interdependent. Whenever two have
+// been entered, deduce the third. The derived one is the field NOT among the two
+// most recently edited, so editing any field recomputes the stalest one.
+function cardioDeduce(ex){
+  const c=ex.cardio;if(!c)return null;
+  const all=['distance','duration','speed'];
+  let inputs=(c._last||[]).filter(k=>all.includes(k)).slice(0,2);
+  if(inputs.length<2)inputs=all.filter(k=>c[k]!==""&&isFinite(parseFloat(c[k]))).slice(0,2);
+  if(inputs.length<2)return null;
+  const derived=all.find(k=>!inputs.includes(k));
+  const d=parseFloat(c.distance), t=parseFloat(c.duration), s=parseFloat(c.speed);
+  let v=null;
+  if(derived==='speed'&&isFinite(d)&&isFinite(t)&&t>0)v=d*60/t;
+  else if(derived==='duration'&&isFinite(d)&&isFinite(s)&&s>0)v=d/s*60;
+  else if(derived==='distance'&&isFinite(s)&&isFinite(t))v=s*t/60;
+  if(v==null||!isFinite(v)||v<0)return null;
+  return {field:derived, value:(derived==='distance'?round2(v):round1(v))};
 }
 function renderExBlock(ex,i){
   const type=ex.type||"strength";
@@ -1153,14 +1181,18 @@ function renderExBlock(ex,i){
     </div>` : "";
   let bodyHtml;
   if(type==="cardio"){
-    const c=ex.cardio||{distance:"",duration:""};
-    bodyHtml=`<div class="cardio-grid">
-      <label class="cfield"><span>Distance (km)</span>
-        <input type="number" inputmode="decimal" data-ex="${i}" data-f="distance" value="${esc(c.distance)}"></label>
-      <label class="cfield"><span>Time (min)</span>
-        <input type="number" inputmode="decimal" data-ex="${i}" data-f="duration" value="${esc(c.duration)}"></label>
+    const c=ex.cardio||{distance:"",duration:"",speed:""};
+    const dv=(c._last||[]).slice(0,2);  // which two were last edited (the third is derived)
+    const der=['distance','duration','speed'].find(k=>dv.length>=2&&!dv.includes(k)&&c[k]!=="");
+    const chips=CARDIO_MACHINES.map(mn=>`<button class="cardio-chip${(ex.name||'').toLowerCase()===mn.toLowerCase()?' on':''}" data-cardio-machine="${i}" data-name="${esc(mn)}">${mn}</button>`).join("");
+    const fld=(key,lbl)=>`<label class="cfield"><span>${lbl}</span><input type="number" inputmode="decimal" class="${der===key?'derived':''}" data-ex="${i}" data-f="${key}" value="${esc(c[key]||'')}"></label>`;
+    bodyHtml=`<div class="cardio-chips">${chips}</div>
+    <div class="cardio-grid3">
+      ${fld('distance','Distance (km)')}
+      ${fld('duration','Time (min)')}
+      ${fld('speed','Speed (km/h)')}
     </div>
-    <div class="pace" id="pace-${i}">${paceStr(c)}</div>`;
+    <div class="pace" id="pace-${i}">${cardioSummary(c)}</div>`;
   }else{
     let rows="";
     for(let s=0;s<ex.sets.length;s++){
@@ -1191,8 +1223,16 @@ function wireLogInputs(el){
     inp.addEventListener("input",()=>{
       const i=+inp.dataset.ex, f=inp.dataset.f, ex=session.exercises[i];
       if(f==="name"){ex.name=inp.value;}
-      else if(f==="distance"||f==="duration"){ex.cardio=ex.cardio||{distance:"",duration:""};ex.cardio[f]=inp.value;
-        const pc=document.getElementById("pace-"+i);if(pc)pc.textContent=paceStr(ex.cardio);}
+      else if(f==="distance"||f==="duration"||f==="speed"){
+        ex.cardio=ex.cardio||{distance:"",duration:"",speed:""};
+        ex.cardio[f]=inp.value;
+        ex.cardio._last=[f].concat((ex.cardio._last||[]).filter(k=>k!==f)).slice(0,2);
+        const dd=cardioDeduce(ex);
+        $$('input[data-ex="'+i+'"][data-f]',el).forEach(x=>x.classList.remove('derived'));
+        if(dd){ex.cardio[dd.field]=String(dd.value);
+          const other=el.querySelector('input[data-ex="'+i+'"][data-f="'+dd.field+'"]');
+          if(other&&document.activeElement!==other){other.value=dd.value;other.classList.add('derived');}}
+        const pc=document.getElementById("pace-"+i);if(pc)pc.textContent=cardioSummary(ex.cardio);}
       else{const s=+inp.dataset.set;ex.sets[s][f]=inp.value;
         inp.classList.toggle("filled",inp.value!=="");
         updateTrackDots(el,i);}
@@ -1218,6 +1258,9 @@ function wireLogInputs(el){
   $$('.type-toggle button',el).forEach(b=>b.addEventListener("click",()=>{
     const i=+b.parentElement.dataset.ex;
     session.exercises[i].type=b.dataset.type;saveDraft();renderLog();
+  }));
+  $$('[data-cardio-machine]',el).forEach(b=>b.addEventListener("click",()=>{
+    const i=+b.dataset.cardioMachine;session.exercises[i].name=b.dataset.name;saveDraft();renderLog();
   }));
   $$('.ex-del',el).forEach(b=>b.addEventListener("click",()=>{
     const i=+b.dataset.delEx;session.exercises.splice(i,1);saveDraft();renderLog();
@@ -1283,8 +1326,8 @@ function finishWorkout(sendGarmin){
     const name=(ex.name||"").trim();
     if(!name)return;
     if((ex.type||"strength")==="cardio"){
-      const dist=num((ex.cardio||{}).distance), dur=num((ex.cardio||{}).duration);
-      if(dist!=null||dur!=null) exercises.push({name,type:"cardio",cardio:{distanceKm:dist,durationMin:dur}});
+      const dist=num((ex.cardio||{}).distance), dur=num((ex.cardio||{}).duration), spd=num((ex.cardio||{}).speed);
+      if(dist!=null||dur!=null||spd!=null) exercises.push({name,type:"cardio",cardio:{distanceKm:dist,durationMin:dur,speedKmh:spd}});
     }else{
       const sets=ex.sets.map(s=>{
         const r=s.reps!==""?num(s.reps):null;
