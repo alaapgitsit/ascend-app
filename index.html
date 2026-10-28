@@ -1357,6 +1357,7 @@ const METRICS=[
   {k:"weight",label:"Weight",unit:()=>unitLbl(),color:"#628078",conv:v=>round1(fromKg(v))},
   {k:"kcal",label:"Calories",unit:()=>"cal",color:"#ff3a22",food:true},
   {k:"steps",label:"Steps",unit:()=>"",color:"#a4893d"},
+  {k:"train",label:"Training days",unit:()=>"",color:"#ff3a22",train:true},
   {k:"deep",label:"Deep sleep",unit:()=>"h",color:"#c7af6b"},
   {k:"sleep",label:"Total sleep",unit:()=>"h",color:"#628078"},
   {k:"waist",label:"Waist",unit:()=>"cm",color:"#ff3a22"},
@@ -1369,7 +1370,16 @@ const METRICS=[
   {k:"hrv",label:"HRV",unit:()=>"ms",color:"#628078"},
   {k:"fast",label:"Fasting Hours",unit:()=>"h",color:"#c7af6b"}
 ];
+// Training days as yes/no: 1 on days with a logged workout, 0 otherwise, one point
+// per day for the past year (the range selector trims it to the chosen window).
+function trainingDays(){
+  const set=new Set(state.workouts.map(w=>dkey(w.date)));
+  const today=startOfDay(Date.now());const out=[];
+  for(let i=365;i>=0;i--){const d=dkey(today-i*864e5);out.push({date:d,val:set.has(d)?1:0});}
+  return out;
+}
 function metricPoints(k){
+  if(k==="train")return trainingDays();
   if(k==="kcal")return kcalDaily();
   if(k==="cardioDist")return cardioDaily("dist");
   if(k==="cardioPace")return cardioDaily("pace");
@@ -1417,12 +1427,11 @@ function openCustomRange(){
 }
 function renderGraphs(){
   const el=$("#tab-graphs");
-  const exNames=allExerciseNames().filter(n=>seriesFor(n).length>0);
+  if(String(graphMetric).indexOf("ex:")===0)graphMetric="weight";   // per-exercise trends removed
   const metricPills=METRICS.filter(m=>metricPoints(m.k).length>0).map(m=>`<button class="ex-pill ${graphMetric===m.k?'active':''}" data-m="${m.k}">${m.label}</button>`).join("");
-  const exPills=exNames.map(n=>`<button class="ex-pill ${graphMetric==='ex:'+n?'active':''}" data-m="ex:${esc(n)}">🏋 ${esc(n)}</button>`).join("");
   el.innerHTML=`
     <div class="section-title">Trends</div>
-    <div class="ex-pills">${metricPills}${exPills}</div>
+    <div class="ex-pills">${metricPills}</div>
     <div class="range-row">${RANGES.map(r=>`<button class="range-pill ${graphRange===r[0]?'active':''}" data-r="${r[0]}">${r[1]}</button>`).join("")}</div>
     <div class="chart-card"><div class="chart-wrap"><canvas id="chart"></canvas></div></div>
     <div class="section-title">Snapshot <span class="range-tag">${esc(rangeLabel())}</span></div>
@@ -1454,6 +1463,8 @@ function trendSummary(){
       const ls=sys[sys.length-1].val,ld=dia.length?dia[dia.length-1].val:null,dd=round1(ls-sys[0].val);
       const bcls=dd===0?'flat':(dd<0?'up':'down');const barrow=dd>0?`▲ ${fmtNum(Math.abs(dd))}`:dd<0?`▼ ${fmtNum(Math.abs(dd))}`:'—';
       return `<div class="prog-item"><div class="nm">Blood pressure</div><div class="bw tnum">${fmtNum(ls)}${ld!=null?'/'+fmtNum(ld):''}<small> mmHg</small></div><div class="chg ${bcls}">${barrow}</div></div>`;}
+    if(m.k==="train"){const pts=filterRange(metricPoints("train"));const trained=pts.filter(p=>p.val>0).length;
+      return `<div class="prog-item"><div class="nm">Training days</div><div class="bw tnum">${trained}<small> / ${pts.length}</small></div><div class="chg ${trained>0?'up':'flat'}">${trained} trained</div></div>`;}
     const pts=filterRange(metricPoints(m.k));if(!pts.length)return "";
     const last=pts[pts.length-1].val, first=pts[0].val, d=round1(last-first);
     const lowerBetter=(m.k==="weight"||m.k==="waist"||m.k==="hip"||m.k==="kcal"||m.k==="cardioPace"||m.k==="bp");
@@ -1474,34 +1485,36 @@ function drawBP(){
     {data:dataD,label:"Diastolic",borderColor:"#628078",borderWidth:2.5,tension:.25,fill:false,spanGaps:true,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:"#628078",pointBorderColor:"#ffffff",pointBorderWidth:1.5}]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       plugins:{legend:{display:true,labels:{color:"#6c6454",font:{family:"Archivo",weight:"700",size:11},boxWidth:14,boxHeight:3}},
-        tooltip:{backgroundColor:"#191714",borderColor:"#3a3630",borderWidth:1,titleColor:"#ffffff",bodyColor:"#e4dfd2",padding:10,callbacks:{label:c=>` ${c.dataset.label}: ${fmtNum(c.parsed.y)} mmHg`}}},
-      scales:{x:{grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#9b937f",font:{family:"Archivo",weight:"700",size:10},maxRotation:0,autoSkip:true,maxTicksLimit:7,callback:function(v){const l=this.getLabelForValue(v);return l?String(l).slice(5):l;}}},
+        tooltip:{backgroundColor:"#191714",borderColor:"#3a3630",borderWidth:1,titleColor:"#ffffff",bodyColor:"#e4dfd2",padding:10,callbacks:{title:items=>items.length?fullDMY(items[0].label):'',label:c=>` ${c.dataset.label}: ${fmtNum(c.parsed.y)} mmHg`}}},
+      scales:{x:{grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#9b937f",font:{family:"Archivo",weight:"700",size:10},maxRotation:0,autoSkip:true,maxTicksLimit:7,callback:function(v){return axisDMY(this.getLabelForValue(v));}}},
         y:{grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#6c6454",font:{family:"Archivo",weight:"700",size:10},callback:v=>fmtNum(v)},grace:"8%"}}}});
 }
 function drawTrend(){
   const cv=$("#chart");if(!cv||!window.Chart)return;
   if(graphMetric==="bp"){drawBP();return;}
-  let pts,label,unit,color;
-  if(graphMetric.indexOf("ex:")===0){const n=graphMetric.slice(3);const s=seriesFor(n);
-    pts=s.map(p=>({date:p.date,val:round1(fromKg(p.kg))}));label=n;unit=unitLbl();color="#628078";}
-  else{const m=METRICS.find(x=>x.k===graphMetric)||METRICS[0];pts=metricPoints(m.k);label=m.label;unit=m.unit();color=m.color;}
-  pts=filterRange(pts);
+  const isTrain=graphMetric==="train";
+  const m=METRICS.find(x=>x.k===graphMetric)||METRICS[0];
+  let pts=filterRange(metricPoints(m.k));const label=m.label,unit=m.unit(),color=m.color;
   const labels=pts.map(p=>p.date), data=pts.map(p=>p.val);
   if(chart)chart.destroy();
   const ctx=cv.getContext("2d");
   const grad=ctx.createLinearGradient(0,0,0,230);
   grad.addColorStop(0,color+"55");grad.addColorStop(1,color+"00");
   const many=data.length>90;
+  const yScale=isTrain
+    ? {min:0,max:1,grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#6c6454",font:{family:"Archivo",weight:"700",size:11},stepSize:1,callback:v=>v>=0.5?'Yes':'No'}}
+    : {grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#6c6454",font:{family:"Archivo",weight:"700",size:10},precision:1,callback:v=>fmtNum(v)+(unit||"")},grace:"6%"};
   chart=new Chart(ctx,{type:"line",data:{labels,datasets:[{data,label,borderColor:color,borderWidth:2.5,
-    tension:.25,fill:true,backgroundColor:grad,pointRadius:many?0:3,pointHoverRadius:5,
+    tension:isTrain?0:.25,stepped:isTrain?true:false,fill:true,backgroundColor:grad,pointRadius:isTrain?3:(many?0:3),pointHoverRadius:5,
     pointBackgroundColor:color,pointBorderColor:"#ffffff",pointBorderWidth:1.5}]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       plugins:{legend:{display:false},tooltip:{backgroundColor:"#191714",borderColor:"#3a3630",borderWidth:1,
-        titleColor:"#ffffff",bodyColor:"#e4dfd2",padding:10,callbacks:{label:c=>` ${fmtNum(c.parsed.y)} ${unit}`}}},
+        titleColor:"#ffffff",bodyColor:"#e4dfd2",padding:10,callbacks:{
+          title:items=>items.length?fullDMY(items[0].label):'',
+          label:c=>isTrain?(c.parsed.y>=0.5?' Trained ✓':' Rest day'):` ${fmtNum(c.parsed.y)} ${unit}`}}},
       scales:{x:{grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#9b937f",font:{family:"Archivo",weight:"700",size:10},
-        maxRotation:0,autoSkip:true,maxTicksLimit:7,callback:function(v){const l=this.getLabelForValue(v);return l?String(l).slice(5):l;}}},
-        y:{grid:{color:"rgba(60,40,10,.10)"},ticks:{color:"#6c6454",font:{family:"Archivo",weight:"700",size:10},
-          precision:1,callback:v=>fmtNum(v)+(unit||"")},grace:"6%"}}}});
+        maxRotation:0,autoSkip:true,maxTicksLimit:7,callback:function(v){return axisDMY(this.getLabelForValue(v));}}},
+        y:yScale}}});
 }
 
 /* ---- file saving: works inside the sandboxed artifact (downloads capability)
@@ -1659,7 +1672,10 @@ $("#settingsBtn").addEventListener("click",openSettings);
 const MEALS=["Breakfast","Lunch","Dinner","Snacks"];
 function dkey(date){const d=new Date(date);const p=n=>String(n).padStart(2,"0");return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;}
 function fmtFullDate(d){return new Date(d).toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"});}
-function fmtDDMMYYYY(d){d=new Date(d);const p=n=>String(n).padStart(2,"0");return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}`;}
+function fmtDDMMYYYY(d){d=new Date(d);const p=n=>String(n).padStart(2,"0");return `${p(d.getDate())}-${p(d.getMonth()+1)}-${d.getFullYear()}`;}
+// Chart helpers: a "YYYY-MM-DD" key → "DD-MM" (axis) or "DD-MM-YYYY" (tooltip).
+function axisDMY(l){const m=String(l).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?m[3]+'-'+m[2]:String(l);}
+function fullDMY(l){const m=String(l).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?m[3]+'-'+m[2]+'-'+m[1]:String(l);}
 function histFor(date){return CAL_HISTORY[dkey(date)]||null;}
 function foodDay(date){return (state.food&&state.food[dkey(date)])||null;}
 function mealTotal(date,m){const fd=foodDay(date);if(!fd||!fd[m])return null;return Math.round(fd[m].reduce((a,it)=>a+(+it.k||0),0));}
