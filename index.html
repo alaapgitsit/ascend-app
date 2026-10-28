@@ -221,6 +221,9 @@ main{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:
 .sets-head,.set-row{display:grid;grid-template-columns:34px 1fr 1fr 30px;gap:8px;align-items:center}
 .sets-head{margin-bottom:6px}
 .sets-head span{font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--faint);font-weight:800;text-align:center}
+.wunit-btn{border:1px solid var(--line);background:var(--surface-2);color:var(--muted);border-radius:7px;padding:2px 7px;font:inherit;font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;cursor:pointer;margin-left:4px}
+.wunit-btn.lb{background:var(--primary);border-color:var(--primary);color:#fff}
+.wunit-btn:active{transform:scale(.95)}
 .sets-head span:first-child{text-align:left;padding-left:4px}
 .set-row{margin-bottom:7px}
 .set-n{font-family:var(--font-display);font-size:15px;color:var(--faint);text-align:center}
@@ -1157,7 +1160,7 @@ function renderExBlock(ex,i){
         <div class="track ${isTrack?'':'off'}">●</div>
       </div>`;
     }
-    bodyHtml=`<div class="sets-head"><span>Set</span><span>Reps</span><span>Weight (${unitLbl()})</span><span></span></div>${rows}`;
+    bodyHtml=`<div class="sets-head"><span>Set</span><span>Reps</span><span>Weight <button class="wunit-btn${session.lbInput?' lb':''}" data-wunit title="Enter in pounds (converts to kg)">${session.lbInput?'lb→kg':unitLbl()}</button></span><span></span></div>${rows}`;
   }
   return `<div class="ex-block">
     <div class="ex-top">
@@ -1182,7 +1185,23 @@ function wireLogInputs(el){
         updateTrackDots(el,i);}
       saveDraft();
     });
+    // When "lb" input is on, a weight typed as pounds is converted to kg the moment
+    // you leave the field — so the logged value is always kg.
+    if(inp.dataset.f==="weight"){
+      inp.addEventListener("change",()=>{
+        if(!session.lbInput)return;
+        const lb=num(inp.value);if(lb==null)return;
+        const kg=round1(fromKg(lb*KG_PER_LB));
+        const s=+inp.dataset.set, i=+inp.dataset.ex;
+        inp.value=kg;session.exercises[i].sets[s].weight=String(kg);saveDraft();
+        if(typeof toast==="function")toast(`${lb} lb → ${kg} ${unitLbl()}`);
+      });
+    }
   });
+  $$('[data-wunit]',el).forEach(b=>b.addEventListener("click",()=>{
+    session.lbInput=!session.lbInput;saveDraft();renderLog();
+    if(typeof toast==="function")toast(session.lbInput?"Enter weights in lb — they'll convert to kg":"Back to kg entry");
+  }));
   $$('.type-toggle button',el).forEach(b=>b.addEventListener("click",()=>{
     const i=+b.parentElement.dataset.ex;
     session.exercises[i].type=b.dataset.type;saveDraft();renderLog();
