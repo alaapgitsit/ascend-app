@@ -2849,7 +2849,15 @@ window.__ascendBack=function(){
   }catch(e){}
   return false;
 };
-window.__ascendForceHome=function(){try{setTab('home');}catch(e){}};
+// Where to land when the app is reopened/unlocked: the Log tab if a workout is
+// in progress, otherwise Home (the default for non-training opens).
+function resumeTab(){return (session&&Array.isArray(session.exercises))?'log':'home';}
+window.__ascendForceHome=function(){try{setTab(resumeTab());}catch(e){}};
+// PWA / browser: on returning to the app, jump to the live workout (but never
+// force Home on a normal re-focus — only redirect when a session is active).
+document.addEventListener('visibilitychange',()=>{try{
+  if(document.visibilityState==='visible'&&session&&activeTab!=='log')setTab('log');
+}catch(e){}});
 
 
 // boot — restore any in-progress workout saved before the app closed
@@ -2857,8 +2865,8 @@ try{const d=loadDraft();if(d&&Array.isArray(d.exercises)){session=d;session.star
   session.timer=session.timer||{running:false,elapsedBefore:0,startedAt:null};
   if(session.timer.running){session.timer.running=false;session.timer.startedAt=null;} // pause on restore, don't count closed time
   startAutoSave();}}catch(e){}
-renderHome();
-if(session){setTimeout(()=>toast("Restored your in-progress workout — open Log"),500);}
+if(session){setTab('log');setTimeout(()=>toast("Resumed your in-progress workout"),500);}
+else renderHome();
 </script>
 
 <script>if("serviceWorker" in navigator){addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script></body></html>
