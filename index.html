@@ -2169,10 +2169,26 @@ function loadZXing(){
   });
   return _zxingP;
 }
+// On Android the WebView blocks the cross-origin Open Food Facts request (CORS),
+// so run the HTTP GET natively in Kotlin when that bridge exists; fall back to a
+// normal browser fetch (PWA / desktop). Returns the response body text.
+const _httpCb={};
+window.__ascendHttp=function(id,status,b64){const cb=_httpCb[id];if(!cb)return;delete _httpCb[id];
+  let body="";try{body=decodeURIComponent(escape(atob(b64)));}catch(e){try{body=atob(b64);}catch(_){body="";}}
+  if(status>=200&&status<300)cb.resolve(body);else cb.reject(new Error("HTTP "+status));};
+function nativeHttpGet(url){return new Promise((resolve,reject)=>{
+  const id="h"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);_httpCb[id]={resolve,reject};
+  try{window.AndroidAscend.httpGet(url,id);}catch(e){delete _httpCb[id];reject(e);return;}
+  setTimeout(()=>{if(_httpCb[id]){delete _httpCb[id];reject(new Error("timeout"));}},18000);});}
+function offFetch(url){
+  if(window.AndroidAscend&&window.AndroidAscend.httpGet)return nativeHttpGet(url);
+  const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),14000);
+  return fetch(url).then(r=>r.text()).finally(()=>clearTimeout(to));
+}
 function offLookup(code){
   const url="https://world.openfoodfacts.org/api/v2/product/"+encodeURIComponent(code)+
     ".json?fields=product_name,brands,nutriments,serving_size,quantity";
-  return fetch(url,{headers:{'Accept':'application/json'}}).then(r=>r.json()).then(j=>{
+  return offFetch(url).then(txt=>JSON.parse(txt)).then(j=>{
     if(!j||j.status!==1||!j.product)return null;
     const p=j.product,nu=p.nutriments||{};
     // Prefer per-serving values if present, else per-100g.
@@ -2202,9 +2218,7 @@ function offSearch(query){
   // No sort_by — the popularity sort makes Open Food Facts' search time out.
   const url="https://world.openfoodfacts.org/cgi/search.pl?search_terms="+encodeURIComponent(query)+
     "&search_simple=1&action=process&json=1&page_size=25&fields=product_name,brands,nutriments";
-  const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),13000);
-  return fetch(url,{signal:ctrl.signal}).then(r=>r.json()).then(j=>{
-    clearTimeout(to);
+  return offFetch(url).then(txt=>JSON.parse(txt)).then(j=>{
     const prods=(j&&j.products)||[];const out=[];
     prods.forEach(p=>{
       const nu=p.nutriments||{};const k=+nu['energy-kcal_100g'];
@@ -2992,21 +3006,32 @@ window.__ascendBack=function(){
 };
 // Where to land when the app is reopened/unlocked: the Log tab if a workout is
 // in progress, otherwise Home (the default for non-training opens).
-function resumeTab(){return (session&&Array.isArray(session.exercises))?'log':'home';}
+// Only reopen on the Log tab for a GENUINELY in-progress NEW workout — one with
+// entered data or a running timer. Editing a saved session, or an untouched
+// template, does not count, so the app defaults to Home otherwise.
+function resumeTab(){
+  try{if(session&&!session.editingId&&Array.isArray(session.exercises)&&
+    (sessionHasData()||(session.timer&&session.timer.running)))return 'log';}catch(e){}
+  return 'home';
+}
 window.__ascendForceHome=function(){try{setTab(resumeTab());}catch(e){}};
-// PWA / browser: on returning to the app, jump to the live workout (but never
-// force Home on a normal re-focus — only redirect when a session is active).
+// PWA / browser: on returning to the app, jump to a live workout — never force
+// Home, and never redirect for an edit view or an untouched session.
 document.addEventListener('visibilitychange',()=>{try{
-  if(document.visibilityState==='visible'&&session&&activeTab!=='log')setTab('log');
+  if(document.visibilityState==='visible'&&resumeTab()==='log'&&activeTab!=='log')setTab('log');
 }catch(e){}});
 
 
-// boot — restore any in-progress workout saved before the app closed
-try{const d=loadDraft();if(d&&Array.isArray(d.exercises)){session=d;session.startedAt=Date.now();
-  session.timer=session.timer||{running:false,elapsedBefore:0,startedAt:null};
-  if(session.timer.running){session.timer.running=false;session.timer.startedAt=null;} // pause on restore, don't count closed time
-  startAutoSave();}}catch(e){}
-if(session){setTab('log');setTimeout(()=>toast("Resumed your in-progress workout"),500);}
+// boot — restore an in-progress workout saved before the app closed, but discard
+// a stale "edit a saved session" draft so the app doesn't reopen on Train.
+try{const d=loadDraft();
+  if(d&&d.editingId){clearDraft();}
+  else if(d&&Array.isArray(d.exercises)){session=d;session.startedAt=Date.now();
+    session.timer=session.timer||{running:false,elapsedBefore:0,startedAt:null};
+    if(session.timer.running){session.timer.running=false;session.timer.startedAt=null;} // pause on restore
+    startAutoSave();}
+}catch(e){}
+if(session&&resumeTab()==='log'){setTab('log');setTimeout(()=>toast("Resumed your in-progress workout"),500);}
 else renderHome();
 </script>
 
